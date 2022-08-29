@@ -1,13 +1,13 @@
 # RNAseq
 Programmes required
-FastQC
+FastQC: 
 https://www.bioinformatics.babraham.ac.uk/projects/fastqc/
-MultiQC
+MultiQC: 
 https://multiqc.info/
-TrimGalore
+TrimGalore: 
 https://www.bioinformatics.babraham.ac.uk/projects/trim_galore/
-Samtools
+Samtools: 
 http://www.htslib.org/download/
-STAR 
+STAR: 
 http://www.htslib.org/download/
 
