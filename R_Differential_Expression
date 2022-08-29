@@ -1,0 +1,142 @@
+list.files()
+library(GenomicFeatures)
+library(GenomicRanges)
+library(GenomicAlignments)
+library(tidyverse)
+library(Rsamtools)
+library(edgeR)
+library(DESeq2)
+library(GOstats)
+library(systemPipeR)
+
+if (!require("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install(version = "3.15")
+
+BiocManager::install("DESeq2")
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("GOstats")
+
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("systemPipeR", force = TRUE)
+
+install.packages("remotes")
+remotes::install_github("plger/overlapper")
+
+loadTaxonomyDb()
+
+txdb<- makeTxDbFromGFF(file='~/reference/reference.gff', format = 'auto', dataSource = "~/reference/", organism = NA)
+saveDb(txdb, file="At.sqlite")
+txdb<-loadDb("At.sqlite")
+eByg<-exonsBy(txdb, by = "gene")
+
+targets <- data.frame(FileName = c("20002-1.bam", "20003-19.bam", "20007.bam", "20009.bam", "20010_1.bam", "B11-20-3-6.bam", "B11-20-3-11.bam", "E7Aligned.bam", "H15.bam", "J7.bam"),
+                      SampleName= c("20002-1", "20003-19", "20007-1", "20009-2", "20010-1", "B11-20-3-6", "B11-20-3-11", "E7", "H15", "J7"),
+                      Factor= c ("SI_pollen", "SI_pollen", "SI_pollen","SI_pollen", "SI_pollen","SF_pollen", "SF_pollen", "SF_pollen", "SF_pollen", "SF_pollen")
+)
+write.csv(targets, "targets.csv", row.names = FALSE)
+targets<-read.csv('targets.csv', header=T)
+targets
+##Next use the readLines command to tell R where to find the data, and read in the data using BamFileList
+bf<-BamFileList(list.files(path = "~/RNAseq/BAM/", pattern = ".bam"))
+bf
+
+##Generate the count data by overlapping the reads with the regions in the genome (genes) generated in eByg
+countR<-summarizeOverlaps(eByg, bf, ignore.strand = TRUE)
+countR<-assays(countR)$counts %>% as.data.frame()
+head(countR)
+names(countR)<-list.files(path = "~/RNAseq/BAM/", pattern = "\\.bam$")
+countR[1:3,]
+
+##deseq
+conds<-targets$Factor
+targets$FileName
+colnames(countR)
+dds<- DESeqDataSetFromMatrix(countData = as.matrix(countR),
+                             colData = data.frame(conds=factor(conds)),
+                             design = formula(~conds))
+dds<-DESeq(dds)
+ddseq_all<-res_ddseq<-DESeq2::results(dds)
+res_ddseq=na.omit(res_ddseq)
+sum(res_ddseq$padj<=0.05)
+
+SF_SI_countR <-countR[,which(targets$Factor == "SI_pollen" | targets$Factor == "SF_pollen")]
+
+colnames(SF_SI_countR)
+
+SF_SI_targets <-targets[which(targets$Factor == "SI_pollen" | targets$Factor == "SF_pollen"),]
+SF_SI_targets
+
+##deseq but on SF vs Elite
+conds<-SF_SI_targets$Factor
+SF_SI_targets$FileName
+colnames(SF_SI_countR)
+dds_SI_SF<- DESeqDataSetFromMatrix(countData = as.matrix(SF_SI_countR),
+                                   colData = data.frame(conds=factor(conds)),
+                                   design = formula(~conds))
+dds_SI_SF<-DESeq(dds_SI_SF)
+res_SF_SI_pollen_ddseq<-DESeq2::results(dds_SI_SF)
+res_SF_SI_pollen_ddseq=na.omit(res_SF_SI_pollen_ddseq)
+write.csv(res_SF_SI_pollen_ddseq, "~/RNAseq/_SI_SF_pollen_all.csv", row.names = TRUE)
+sum(res_SF_SI_pollen_ddseq$padj<=0.05)
+sum(res_SF_SI_pollen_ddseq[,c(1)])
+
+df<-res_SF_SI_pollen_ddseq[p.adjust(res_SF_SI_pollen_ddseq$pvalue,n=38066251,method="fdr") <= 0.05 , ]
+df<-data.frame(df)
+DESeqList_SF_SI_pollen<-df[order(df$padj),]
+row.names((DESeqList_SF_SI_pollen)[1:20,])
+colnames((DESeqList_SF_SI_pollen)[1:20,])
+##
+head(res_SF_SI_pollen_ddseq)
+sig_SF_SI_gene <-res_SF_SI_pollen_ddseq[res_SF_SI_pollen_ddseq$padj<=0.05,]
+sig_SF_SI_gene<-data.frame(sig_SF_SI_gene)
+rownames(sig_SF_SI_gene)
+write.csv(sig_SF_SI_gene, file = "~/RNAseq/2022_sig_SF_SI_gene.csv")                      
+GTF<-read.delim("~/2reference/reference.gff", header = FALSE)
+siggenes_SF_Elite<-paste("transcript_id",rownames(sig_SF_SI_gene), sep = " ")
+head(GTF$V9)
+head(siggenes_SF_Elite)
+library(stringr)
+GTF
+str_extract()
+write.csv(siggenes_SF_Elite, file = "~/RNAseq/2022_siggenes_SF_SI_pollen_ddseq.csv")
+write.csv(res_SF_SI_pollen_ddseq, file = "~/RNAseq/2022_non-sigSI_SF.csv")
+##PCA plot of SF and SI
+#Transform into log data
+log_transformed_deseq_output = rlogTransformation(dds_SI_SF,blind = TRUE)
+
+#Principle component analysis
+print(plotPCA(log_transformed_deseq_output,intgroup=c("conds")))
+
+library(ggplot2)
+library(ggrepel)
+
+SF_region_all <- read.csv("~/RNAseq_1_6_22/2022_DESeq_SF_locus.csv")
+a<-ggplot(data=SF_region_all, aes(x=log2FoldChange, y=-log10(pvalue))) + geom_point()+ theme_minimal() + geom_vline(xintercept=c(-0.6, 0.6), col="red") +
+  geom_hline(yintercept=-log10(0.05), col="red")
+
+SF_region_all$diffexpressed <- "No change"
+# if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP" 
+SF_region_all$diffexpressed[SF_region_all$log2FoldChange > 0.6 & SF_region_all$padj < 0.05] <- "Up regulated in SC"
+
+# if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"
+SF_region_all$diffexpressed[SF_region_all$log2FoldChange < -0.6 & SF_region_all$padj < 0.05] <- "Down regulated in SC"
+# Re-plot but this time color the points with "diffexpressed"
+ggplot(data=SF_region_all, aes(x=log2FoldChange, y=-log10(pvalue), col=diffexpressed))+ geom_vline(xintercept=c(-0.6, 0.6), col="red") +
+  geom_hline(yintercept=-log10(0.01), col="red") + geom_point(aes(size =baseMean)) + theme_minimal()+
+  labs(size="Expresssion Level", col="Change in Expression")+
+  geom_label_repel(aes(label = X),
+                   subset(SF_region_all, padj <0.05),
+                   box.padding   = 0.35, 
+                   point.padding = 0.5,
+                   segment.color = 'grey50')+
+  theme(axis.text.x = element_text(size = 12, hjust = 0.5, vjust=0.5, ), axis.title = element_text(size=15), axis.text.y = element_text(size =11))
+
+
+
