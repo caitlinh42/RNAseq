@@ -1,0 +1,66 @@
+#Run FastQC to check sequencing quality
+#!/bin/bash
+for f in *R1_001.fastq.gz
+do
+r1=$f
+r2=${f/R1_001.fastq.gz/}R2_001.fastq.gz
+out1=${f##*/}
+out2=${out1/_fwd*/}
+fastqc fastq/$r1 $r2 -o FastQC
+done
+
+#Trim illumina adapters
+#!/bin/bash
+for f in ~/RNAseq/*_R1_001.fastq.gz
+do
+r1=$f
+r2=${f/_R1_001.fastq.gz/}_R2_001.fastq.gz
+~/TrimGalore-0.6.0/./trim_galore --paired --retain_unpaired --phred33 --output_dir trimmed_reads --length 36 -q 5 --stringency 1 -e 0.1 --path_to_cutadapt ~/.local/bin/cutadapt $r1 $r2
+done
+
+#Check quality again
+##FastQC check
+#!/bin/bash
+for f in *R1_001_val_1.fastq.gz
+do
+r1=$f
+r2=${f/R1_001_val_1.fastq.gz/}R2_001_val_2.fastq.gz
+out1=${f##*/}
+out2=${out1/_fwd*/}
+fastqc trimmed_reads/$r1 $r2 -o FastQC
+done
+
+##MultiQC check
+multiqc ./
+
+#Create STAR genome
+mkdir STARgenome
+STAR --runThreadN 72 --runMode genomeGenerate --genomeDir STARgenome --genomeFastaFiles KyussGenome.fasta --sjdbGTFfile KyussAnnotation.gtf --limitGenomeGenerateRAM 33896294443
+
+##Unzip fastq.gz files prior to STAR alignment
+gunzip *.fq.gz
+
+#!/bin/bash
+for f in ~/RNAseq/*_R1_val_1.fq
+do
+r1=$f
+r2=${f/_R1_val_1.fq/}R2_val_2.fq
+out1=${f/_anther_R1_val_1.cor.fq/}_2022
+#echo $f
+#echo $r2
+#echo $out1
+STAR --runThreadN 72 --genomeDir ~/2022_ref/STARgenome/ --readFilesIn $r1 $r2 --sjdbGTFfile KyussAnnotation.gtf --sjdbGTFfeatureExon CDS --outFileNamePrefix $out1 --quantMode GeneCounts --outSAMtype BAM SortedByCoordinate
+done
+
+#Index .bam files
+#!/bin/bash
+for f in trimmed_reads/*.bam
+do
+samtools index $f
+done
+
+#Quality checking and alignment statistics using MultiQC
+multiqc ./
+
+#Can view indexed alignment files in IGV with reference genome indexed with samtools faidx FILENAME
+#Indexed bam files were then used for differential expression analysis
